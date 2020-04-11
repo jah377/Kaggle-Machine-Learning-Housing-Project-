@@ -1,0 +1,113 @@
+---
+title: "Kaggle"
+author: "Jonathan Harris"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE)
+```
+
+## Load Packages
+```{r}
+
+library(dplyr)     #data manipulation
+library(ggplot2)   #ploting
+library(xgboost)   #xgboost for gradient tree model
+library(moments)   #calculating skewness
+library(caret)     #ML
+library(tidyverse) #Data wrangling
+
+```
+
+#Imputation Density Plot
+```{r}
+
+#Original Data
+original_data = read.csv2('train.csv', header = T, sep = ',')
+Original = original_data$LotFrontage
+
+#Impute by Neighborhood
+Neighborhood.Mean = original_data$LotFrontage
+for (neigh in original_data$Neighborhood) {
+  idx = which(is.na(original_data$LotFrontage) &
+                (original_data$Neighborhood == neigh))
+  Neighborhood.Mean[idx] =  mean(original_data$LotFrontage[original_data$Neighborhood ==
+                                                             neigh], na.rm = T)
+}
+
+#Imput by Mean
+Cum.Mean = original_data$LotFrontage
+idx = which(is.na(original_data$LotFrontage))
+Cum.Mean[idx] = mean(original_data$LotFrontage, na.rm = T)
+
+#Combine into DataFrame
+data = data.frame(Original, Cum.Mean, Neighborhood.Mean)
+data = data %>% gather(
+  key = 'Method',
+  value = 'value',
+  c(Original, Cum.Mean, Neighborhood.Mean),
+  na.rm = T
+)
+
+#Plot Density Figure
+ggplot(data, aes(x = value, color = Method)) + geom_density() +
+  labs(x = 'Lot Frontage', y = 'Density', title = 'Differences in Imputation Methodology')
+
+#Save Figure
+ggsave(
+  'ImputationMethod.png',
+  plot = last_plot(),
+  scale = 1,
+  width = 5,
+  height = 3,
+  units = c("in"),
+  dpi = 300
+)
+
+```
+
+#Outlier Plot: LotArea
+```{r}
+
+#Load original Data
+orig_data = read.csv('train.csv', sep=',', stringsAsFactors = F)
+orig_LotFrontage = orig_data$LotFrontage
+orig_HPlog = orig_data$SalePrice
+
+#Find outliers
+avg = mean(orig_LotFrontage, na.rm=T)  # calc average
+stdev = sd(orig_LotFrontage, na.rm=T)  # calc standard deviation
+z_score = (orig_LotFrontage - avg) / stdev  # calc z_score
+ol = z_score > 6  # boolean (True=outlier)
+outlier_idx = which(ol)  # indexes of outliers
+
+label_orig = as.character(rep('Original', times = length(orig_LotFrontage)))
+label_out = as.character(rep('Outliers', times = length(outlier_idx)))
+orig_HPlog_out = orig_HPlog[outlier_idx]
+lotfront_orig = orig_LotFrontage
+lotfront_out = orig_LotFrontage[outlier_idx]
+
+orig = cbind(label_orig, orig_HPlog, lotfront_orig)
+out = cbind(label_out, orig_HPlog_out, lotfront_out)
+df = data.frame(rbind(orig, out), stringsAsFactors = F)
+names(df) = c('Data_Type', 'House_Price', 'Lot_Area')
+df$House_Price = as.numeric(df$House_Price)
+df$Lot_Area = as.numeric(df$Lot_Area)
+
+ggplot(data=df, aes(x=Lot_Area, y=House_Price, color=Data_Type)) + geom_point() +
+    labs(x = 'Lot Area [ft^2]', y = 'House Price [$]', title = 'House Price vs Lot Frontage')
+
+#Save Figure
+ggsave(
+  'Outliers.png',
+  plot = last_plot(),
+  scale = 1,
+  width = 5,
+  height = 3,
+  units = c("in"),
+  dpi = 300
+)
+
+```
+
+

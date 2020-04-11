@@ -1,0 +1,313 @@
+---
+title: "Kaggle"
+author: "Jonathan Harris"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE)
+```
+
+## Load Packages
+```{r}
+
+library(dplyr)    #data manipulation
+library(ggplot2)  #ploting
+library(xgboost)  #xgboost for gradient tree model
+library(moments)  #calculating skewness
+library(caret)    #ML
+
+```
+
+#Import Data
+```{r}
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) #set directory
+load('train_all_v2.RData') #load original and featured-engineered datasets
+
+```
+
+
+#XGBoost Model 1: Original Dataset
+```{r}
+
+#Prepare predictor and response matrices
+predictors_train = data.matrix(hp_orig %>% select(-SalePrice_log, -Id)) #must be matrix
+response_train = data.matrix(hp_orig %>% select(SalePrice_log, -Id))    #must be matrix
+
+#1st model: original data, no hypertuning
+xgb.orig = xgb.cv(
+  data = predictors_train,     #Predictor variables
+  label = response_train,      #Response variable
+  nrounds = 1000,              #Num of trees
+  nfold = 5,                   #Number of folds (~5-10)
+  objective = "reg:linear",    #Linear regression
+  verbose = 0,                 #No output
+  early_stopping_rounds = 20,  #haults CV if MSE doesn't improve after 10 trees
+)
+
+#Calculate RMSE of train and test
+#RMSE_train = ~ 0.0011762		
+#RMSE_test = ~ 0.1339616
+xgb.orig$evaluation_log %>%
+  summarise(rmse_train = min(train_rmse_mean),
+            rmse_test = min(test_rmse_mean),)
+
+#Plot RMSE vs Number of Trees
+ggplot(xgb.orig$evaluation_log) +
+  geom_line(aes(iter, train_rmse_mean, color = 'Train')) +
+  geom_line(aes(iter, test_rmse_mean, color = 'Test')) +
+  labs(x = 'Number of Trees', y = 'RMSE', title = 'Original Dataset: Train RMSE vs. Number of Trees') + coord_cartesian(ylim = c(0, .2))
+
+# #Create model XGBoost model
+# xgb.orig_test <- xgboost(
+#   data = predictors_train,
+#   #Predictor variables
+#   label = response_train,
+#   #Response variable
+#   nrounds = 1000,
+#   #Num of trees
+#   nfold = 5,
+#   #Number of folds (~5-10)
+#   objective = "reg:linear",
+#   #Linear regression
+#   verbose = 0,
+#   #No output
+# )
+# 
+# #Plot variable importance of 'test' subset of train data
+# importance_mat.orig = xgb.importance(model = xgb.orig_test) #create matrix
+# xgb.plot.importance(importance_mat.orig, top_n = 20, measure = "Gain")
+# 
+# #Predict SalePrice_log of 'test' subset of train data
+# test_df = data.matrix(hp_orig[-train_idx, ] %>% select(-Id, -SalePrice_log)) #isolate test data
+# xgb_pred.orig = predict(xgb.orig_test, test_df) #predict saleprice_log
+# 
+# #Calculate MSE of 'test' subset of train data
+# #MSE.orig = 1.555677e-06
+# MSE.orig = mean((xgb_pred.orig - hp_orig$SalePrice_log[-train_idx]) ^ 2)
+# MSE.orig
+# 
+# #How much is the prediction price off from the actual 'test' price?
+# pred_dol = exp(xgb_pred.orig) #predicted house price [$]
+# act_dol = exp(hp_orig$SalePrice_log[-train_idx]) #actual house price (test subset of training dataset) [$]
+# mean(abs(pred_dol - act_dol))
+
+```
+
+#XGBoost Model 2: Original Dataset + Feature Engineered Continuous Variables
+```{r}
+
+set.seed(249) #determined with forloop
+
+#Add non-categorical variables from featured dataset to original dataset
+df1 = hp_orig %>% select(-GarageCars)
+df2 = hp_feat %>% select(TotalSF, Age, AgeRemod, TotPorchSF, TotCarGarage, TotBaths)
+orig_cont = cbind.data.frame(df1, df2)
+
+#Prepare predictor and response matrices
+predictors_train = data.matrix(orig_cont %>% select(-SalePrice_log, -Id)) #must be matrix
+response_train = data.matrix(orig_cont %>% select(SalePrice_log, -Id))    #must be matrix
+
+#1st model: original data, no hypertuning
+xgb.orig_contfeat = xgb.cv(
+  data = predictors_train,     #Predictor variables
+  label = response_train,      #Response variable
+  nrounds = 1000,              #Num of trees
+  nfold = 5,                   #Number of folds (~5-10)
+  objective = "reg:linear",    #Linear regression
+  verbose = 0,                 #No output
+  early_stopping_rounds = 20,  #haults CV if MSE doesn't improve after 10 trees
+)
+
+#Calculate RMSE of train and test
+  #RMSE_train = ~ 0.0033382	
+  #RMSE_test = ~ 0.1293408
+xgb.orig_contfeat$evaluation_log %>%
+  summarise(rmse_train = min(train_rmse_mean),
+            rmse_test = min(test_rmse_mean),
+  )
+
+#Plot RMSE vs Number of Trees
+ggplot(xgb.orig$evaluation_log) +
+  geom_line(aes(iter, train_rmse_mean, color = 'Train')) +
+  geom_line(aes(iter, test_rmse_mean, color = 'Test')) +
+  labs(x = 'Number of Trees', y = 'RMSE', title = 'Untuned Model: Train RMSE vs. Number of Trees') + coord_cartesian(ylim = c(0, .4)) +
+  annotate(geom = "text", x = 70, y = 0.15, label = "Min: 0.1256") +
+  annotate(geom = "text", x = 70, y = 0.03, label = "Min: 0.0143")
+
+#Save Figure
+ggsave(
+  'UntunedRMSE.png',
+  plot = last_plot(),
+  scale = 1,
+  width = 5,
+  height = 3,
+  units = c("in"),
+  dpi = 300
+)
+
+```
+
+#XGBoost Model 3: Tune Hyperparameters
+```{r}
+
+set.seed(249) #determined with forloop
+
+#Create hypergrid of hyperparameters to tune
+hyper_grid <- expand.grid(
+  eta = c(0.05),                    #learning rate
+  gamma = c(0.05),                  #min loss reduction
+  max_depth = c(4),             #min weight sum required in a child
+  min_child_weight = c(1.20),  #max depth of trees
+  subsample = c(0.3),     #ratio of training predictors 
+  alpha = c(0.2),       #L1 lasso penalization
+  lambda = c(0.7)        #L2 lasso penalization
+)
+
+nrow(hyper_grid)
+
+#Perform Grid Search
+for(i in 1:nrow(hyper_grid)) {
+  
+  #Create parameter list based on iterative hyper grid inputs
+  params = list(
+    eta = hyper_grid$eta[i],
+    gamma = hyper_grid$eta[i],
+    max_depth = hyper_grid$max_depth[i],
+    min_child_weight = hyper_grid$min_child_weight[i],
+    subsample = hyper_grid$subsample[i],
+    alpha = hyper_grid$alpha[i],
+    lambda = hyper_grid$lambda[i]
+  )
+  
+  # ========================================================
+  # min_RMSE = 0.1137642
+  # ========================================================
+  # params = list(
+  #   eta = 0.05,
+  #   gamma = 0.05
+  #   max_depth = 4,
+  #   min_child_weight = 1.2,
+  #   subsample = 0.3,
+  #   alpha = 0.2,
+  #   lambda = 0.7,
+  #   nrounds = 282,
+  # )
+  # ========================================================
+  
+  #Cross-Valication
+  xgb.orig_tran_tune = xgb.cv(
+    params = params,
+    data = predictors_train,     #Predictor variables
+    label = response_train,      #Response variable
+    nrounds = 282,               #Num of trees
+    nfold = 5,                   #Number of folds (~5-10)
+    objective = "reg:linear",    #Linear regression
+    verbose = 0 #,                 #No output
+    #early_stopping_rounds = 10,  #haults CV if MSE doesn't improve after 10 trees
+  )
+  
+  # add min training error and trees to grid
+  hyper_grid$min_trees[i] <- which.min(xgb.orig_tran_tune$evaluation_log$test_rmse_mean)
+  hyper_grid$min_RMSE[i] <- min(xgb.orig_tran_tune$evaluation_log$test_rmse_mean)
+}
+
+ans = hyper_grid %>% arrange(min_RMSE) %>% head(10)
+ans[1,]
+
+#Plot RMSE vs Number of Trees
+ggplot(xgb.orig_tran_tune$evaluation_log) +
+  geom_line(aes(iter, train_rmse_mean, color = 'Train')) +
+  geom_line(aes(iter, test_rmse_mean, color = 'Test')) +
+  labs(x = 'Number of Trees', y = 'RMSE', title = 'Tuned Model: Train RMSE vs. Number of Trees') + coord_cartesian(ylim = c(0, .4)) +
+  annotate(geom = "text", x = 270, y = 0.13, label = "Min: 0.1137") +
+  annotate(geom = "text", x = 270, y = 0.065, label = "Min: 0.0815")
+
+#Save Figure
+ggsave(
+  'TunedRMSE.png',
+  plot = last_plot(),
+  scale = 1,
+  width = 5,
+  height = 3,
+  units = c("in"),
+  dpi = 300
+)
+
+
+```
+#Perform XGBoost on Test Data
+```{r}
+
+#Train Model
+set.seed(249) #determined with forloop
+df1 = hp_orig %>% select(-GarageCars)
+df2 = hp_feat %>% select(TotalSF, Age, AgeRemod, TotPorchSF, TotCarGarage, TotBaths)
+orig_cont = cbind.data.frame(df1, df2)
+
+predictors_train = data.matrix(orig_cont %>% select(-SalePrice_log, -Id)) #must be matrix
+predictors_train = predictors_train[,order(colnames(predictors_train))]
+response_train = data.matrix(orig_cont %>% select(SalePrice_log, -Id))    #must be matrix
+
+params <- list(
+  eta = c(0.05),                #learning rate
+  gamma = c(0.05),              #min loss reduction
+  max_depth = c(4),             #min weight sum required in a child
+  min_child_weight = c(1.20),   #max depth of trees
+  subsample = c(0.3),           #ratio of training predictors 
+  alpha = c(0.2),               #L1 lasso penalization
+  lambda = c(0.7)               #L2 lasso penalization
+)
+
+xgb.final <- xgboost(
+    params = params,
+    data = predictors_train,    #Predictor variables
+    label = response_train,     #Response variable
+    nrounds = 282,              #Num of trees
+    nfold = 5,                  #Number of folds (~5-10)
+    objective = "reg:linear",   #Linear regression
+    verbose = 0                 #No output
+)
+
+#Load Test Data
+load('test_all_v2.RData') #load test data
+
+#Add non-categorical variables from featured dataset to original dataset
+df1 = hp_orig_test %>% select(-GarageCars)
+df2 = hp_feat_test %>% select(TotalSF, Age, AgeRemod, TotPorchSF, TotCarGarage, TotBaths)
+test_data = cbind.data.frame(df1, df2) 
+Id = test_data %>% select(Id) #for kaggle export price
+
+train_names = colnames(predictors_train[,order(colnames(predictors_train))])
+test_names = colnames(predictors_test[,order(colnames(predictors_test))])
+name = cbind(train_names, test_names)
+
+#Prepare predictor asnd predict values
+predictors_test = data.matrix(test_data %>% select(-Id))
+predictors_test = predictors_test[,order(colnames(predictors_test))]
+colnames(predictors_test) = colnames(predictors_train)
+predict_log = predict(xgb.final, predictors_test)  #predict log sales price
+predict_dollar = exp(predict_log) #convert to real values for kaggle
+
+#Create Importance Matrix and Plot
+import_mat = xgb.importance(model = xgb.final)
+xgb.ggplot.importance(import_mat, top_n = 15, measure = "Gain", n_clusters=1) +
+  labs(y = 'Importance', x = 'Features', title = 'XGBoost: Feature Importance') + 
+  theme(legend.position = "none") +
+
+#Save Figure
+ggsave(
+  'Importance.png',
+  plot = last_plot(),
+  scale = 1,
+  width = 5,
+  height = 3,
+  units = c("in"),
+  dpi = 300
+)
+
+#Export CSV for Kaggle
+kaggle = data.frame(Id = Id, SalePrice = predict_dollar)
+write.csv(kaggle, file = 'jah_xgb_predHP.csv', row.names = F)
+
+```
