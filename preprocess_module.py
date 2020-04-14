@@ -271,9 +271,9 @@ def calc_rmse(model, X, Y):
         y_pred = instance.predict(x_test) #test prediction
 
         #Calculate RMSE
-        RMSE=np.sqrt(mean_squared_error(y_test.values, y_pred))
+        RMSE=np.sqrt(mean_squared_error(y_test, y_pred))
         store_rmse.append(RMSE) #store value 
-        store_error_amnt = abs(np.exp(y_test.values)-np.exp(y_pred))      
+        store_error_amnt = abs(np.exp(y_test)-np.exp(y_pred))      
         
     mean_rmse = np.mean(store_rmse)
     mean_error = np.mean(store_error_amnt)
