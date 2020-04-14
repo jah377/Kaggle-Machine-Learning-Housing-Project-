@@ -4,6 +4,12 @@ Module contains helper functions used throughout preprocessing for models
 import numpy as np
 import pandas as pd
 from scipy import stats
+from sklearn.linear_model import Lasso, Ridge, ElasticNet
+from sklearn.model_selection import KFold, cross_val_score, GridSearchCV, RandomizedSearchCV
+from sklearn.metrics import mean_squared_error
+from sklearn.base import BaseEstimator, TransformerMixin, RegressorMixin, clone
+from sklearn.ensemble import GradientBoostingRegressor
+import xgboost as xgb
 
 
 
@@ -240,3 +246,35 @@ def outlier_idx(data, thresh):
     outlier_idx = data.index[ol].tolist()  # list of outliers
 
     return outlier_idx
+
+
+
+# ========== Calculate RMSE ==========
+def calc_rmse(model, X, Y):
+
+    #Cross validation
+    kfold = KFold(n_splits=5, shuffle=True, random_state=1) #train-test
+    
+    store_rmse=[]
+    store_error_amnt = []
+    for train_id, test_id in kfold.split(X, Y):
+        
+        #Assign split
+        x_train = X.values[train_id]
+        y_train = Y.values[train_id]
+        x_test = X.values[test_id]
+        y_test = Y.values[test_id] 
+        
+        #Train mode.
+        instance = clone(model) #clone to avoid attribute assignment
+        instance.fit(x_train, y_train) #fit clone with data
+        y_pred = instance.predict(x_test) #test prediction
+
+        #Calculate RMSE
+        RMSE=np.sqrt(mean_squared_error(y_test.values, y_pred))
+        store_rmse.append(RMSE) #store value 
+        store_error_amnt = abs(np.exp(y_test.values)-np.exp(y_pred))      
+        
+    mean_rmse = np.mean(store_rmse)
+    mean_error = np.mean(store_error_amnt)
+    return mean_rmse, mean_error
