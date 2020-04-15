@@ -256,7 +256,6 @@ def calc_rmse(model, X, Y):
     kfold = KFold(n_splits=5, shuffle=True, random_state=1) #train-test
     
     store_rmse=[]
-    store_error_amnt = []
     for train_id, test_id in kfold.split(X, Y):
         
         #Assign split
@@ -273,8 +272,6 @@ def calc_rmse(model, X, Y):
         #Calculate RMSE
         RMSE=np.sqrt(mean_squared_error(y_test, y_pred))
         store_rmse.append(RMSE) #store value 
-        store_error_amnt = abs(np.exp(y_test)-np.exp(y_pred))      
         
     mean_rmse = np.mean(store_rmse)
-    mean_error = np.mean(store_error_amnt)
-    return mean_rmse, mean_error
+    return mean_rmse
